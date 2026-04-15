@@ -1,0 +1,66 @@
+﻿services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: tg-media-backend
+    restart: unless-stopped
+    env_file:
+      - ./.env
+      - ./backend/.env
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./data:/app/data
+      - ./session:/app/session
+      - ${DOWNLOADS_VOLUME:-./downloads}:/downloads
+      - ./logs/backend:/app/logs
+    networks:
+      - tg_media_net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: tg-media-frontend
+    restart: unless-stopped
+    env_file:
+      - ./.env
+      - ./frontend/.env
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - backend
+    volumes:
+      - ./logs/frontend:/var/log/nginx
+    networks:
+      - tg_media_net
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: tg-media-worker
+    restart: unless-stopped
+    env_file:
+      - ./.env
+      - ./backend/.env
+    environment:
+      - DATABASE_URL=sqlite:////workspace/data/app.db
+      - LOG_FILE=/workspace/logs/downloader.log
+      - HASH_INDEX_FILE=/workspace/app/hash_index.json
+    working_dir: /workspace
+    command: ["python", "app/downloader.py"]
+    depends_on:
+      - backend
+    volumes:
+      - ./:/workspace
+      - ./session:/app/session
+      - ${DOWNLOADS_VOLUME:-./downloads}:/downloads
+      - ./logs/worker:/workspace/logs
+    networks:
+      - tg_media_net
+
+networks:
+  tg_media_net:
+    driver: bridge
