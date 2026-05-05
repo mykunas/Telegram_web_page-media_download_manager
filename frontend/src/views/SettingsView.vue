@@ -93,9 +93,6 @@
             <el-form-item label="下载目录 (DOWNLOAD_DIR)">
               <el-input v-model.trim="downloadForm.DOWNLOAD_DIR" placeholder="下载目录" />
             </el-form-item>
-            <el-form-item label="目标频道 (TARGET_CHATS)">
-              <el-input v-model.trim="downloadForm.TARGET_CHATS" placeholder="多个目标用逗号分隔" />
-            </el-form-item>
             <el-form-item label="允许扩展名 (ALLOW_EXTS)">
               <el-input v-model.trim="downloadForm.ALLOW_EXTS" placeholder="例如 .mp4,.jpg" />
             </el-form-item>
@@ -121,6 +118,7 @@
             <el-button @click="loadAll">恢复默认</el-button>
           </div>
         </el-card>
+
       </section>
 
       <section class="right-col">
@@ -274,14 +272,18 @@ const manualAdjust = reactive({
   tag: {}
 })
 
+function parseTargetChats() {
+  return String(downloadForm.TARGET_CHATS || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
 const topChannels = computed(() => preferenceState.channel_weights.slice(0, 8))
 const topMediaTypes = computed(() => preferenceState.media_type_weights.slice(0, 6))
 const topTags = computed(() => preferenceState.tag_weights.slice(0, 10))
 const targetChatCount = computed(() =>
-  String(downloadForm.TARGET_CHATS || '')
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean).length
+  parseTargetChats().length
 )
 const authStatusText = computed(() => (sessionStatus.authorized ? '运行中' : '未授权'))
 const authStatusSub = computed(() => (sessionStatus.authorized ? '当前会话可用' : '当前会话不可用'))

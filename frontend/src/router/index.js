@@ -1,4 +1,4 @@
-﻿import { createRouter, createWebHistory } from 'vue-router'
+﻿import { createRouter, createWebHashHistory, createWebHistory } from 'vue-router'
 
 const routes = [
   {
@@ -22,8 +22,19 @@ const routes = [
   }
 ]
 
+function isDesktopRuntime() {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  const hasElectronProcess = Boolean(window.process?.versions?.electron)
+  const hasElectronUA = (window.navigator?.userAgent || '').includes('Electron')
+  const isFileProtocol = window.location?.protocol === 'file:'
+  return hasElectronProcess || hasElectronUA || isFileProtocol
+}
+
 const router = createRouter({
-  history: createWebHistory(),
+  history: isDesktopRuntime() ? createWebHashHistory() : createWebHistory(),
   routes
 })
 
