@@ -27,7 +27,7 @@
 
     <el-menu-item-group title="系统设置">
       <el-menu-item index="/settings">电报配置</el-menu-item>
-      <el-menu-item index="/sync-status">同步状态</el-menu-item>
+      <el-menu-item index="/sync-status">同步与频道</el-menu-item>
       <el-menu-item index="/design-system">设计系统</el-menu-item>
     </el-menu-item-group>
   </el-menu>

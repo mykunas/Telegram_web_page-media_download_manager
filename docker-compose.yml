@@ -7,7 +7,6 @@
     restart: unless-stopped
     env_file:
       - ./.env
-      - ./backend/.env
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
@@ -26,7 +25,6 @@
     restart: unless-stopped
     env_file:
       - ./.env
-      - ./frontend/.env
     ports:
       - "${FRONTEND_PORT:-3000}:80"
     depends_on:
@@ -44,7 +42,6 @@
     restart: unless-stopped
     env_file:
       - ./.env
-      - ./backend/.env
     environment:
       - DATABASE_URL=sqlite:////workspace/data/app.db
       - LOG_FILE=/workspace/logs/downloader.log
