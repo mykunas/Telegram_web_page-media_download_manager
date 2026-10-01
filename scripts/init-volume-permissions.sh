@@ -12,7 +12,7 @@ case "$PROJECT_DIR" in
     ;;
 esac
 
-for relative_dir in data session downloads logs/backend logs/worker logs/frontend; do
+for relative_dir in data session downloads backups logs/backend logs/worker logs/frontend; do
   target="$PROJECT_DIR/$relative_dir"
   mkdir -p "$target"
 done
@@ -21,6 +21,7 @@ chown -R "$PUID:$PGID" \
   "$PROJECT_DIR/data" \
   "$PROJECT_DIR/session" \
   "$PROJECT_DIR/downloads" \
+  "$PROJECT_DIR/backups" \
   "$PROJECT_DIR/logs/backend" \
   "$PROJECT_DIR/logs/worker"
 

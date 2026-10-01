@@ -22,11 +22,12 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt \
 
 RUN groupadd --gid "${PGID}" --non-unique app \
     && useradd --uid "${PUID}" --gid "${PGID}" --non-unique --create-home --shell /usr/sbin/nologin app \
-    && install -d -o app -g app /app/backend /app/worker /app/data /app/session /app/downloads /app/logs \
+    && install -d -o app -g app /app/backend /app/worker /app/scripts /app/data /app/session /app/downloads /app/logs /app/backups \
     && ln -s /app/downloads /downloads
 
 COPY --chown=app:app backend/app /app/backend/app
 COPY --chown=app:app app /app/worker
+COPY --chown=app:app scripts /app/scripts
 
 USER app
 STOPSIGNAL SIGTERM

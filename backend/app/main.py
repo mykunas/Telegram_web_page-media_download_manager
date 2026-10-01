@@ -6,7 +6,8 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from app.api.router import api_router
 from app.core.admin_auth import AdminWriteProtectionMiddleware
 from app.core.config import settings
-from app.core.database import SessionLocal, initialize_database
+from app.core.database import SessionLocal, engine, initialize_database
+from app.core.migrations import current_schema_version
 from app.core.exceptions import register_exception_handlers
 from app.core.response import success_response
 from app.core.startup_checks import run_startup_checks
@@ -34,7 +35,13 @@ def create_app() -> FastAPI:
 
     @app.get("/health", tags=["Health"])
     def health_check() -> dict:
-        return success_response(data={"status": "ok"})
+        return success_response(
+            data={
+                "status": "ok",
+                "database": "ok",
+                "schema_version": current_schema_version(engine),
+            }
+        )
 
     app.include_router(api_router, prefix="/api")
     return app

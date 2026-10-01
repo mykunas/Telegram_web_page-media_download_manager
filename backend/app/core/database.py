@@ -5,7 +5,11 @@ from app.core.config import settings
 
 
 # SQLite needs check_same_thread=False for usage across different threads.
-connect_args = {"check_same_thread": False} if settings.DATABASE_URL.startswith("sqlite") else {}
+connect_args = (
+    {"check_same_thread": False, "timeout": 30}
+    if settings.DATABASE_URL.startswith("sqlite")
+    else {}
+)
 
 engine = create_engine(
     settings.DATABASE_URL,
@@ -23,6 +27,8 @@ if settings.DATABASE_URL.startswith("sqlite"):
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA busy_timeout=10000")
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA wal_autocheckpoint=1000")
         cursor.close()
 
 
@@ -36,6 +42,9 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
@@ -53,3 +62,6 @@ def initialize_database() -> None:
     """Application-level database initialization entrypoint."""
 
     init_db()
+    from app.core.migrations import run_migrations
+
+    run_migrations(engine)

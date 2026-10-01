@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.config_registry import DOWNLOAD_KEYS, TELEGRAM_KEYS, decode_storage_value
+from app.core.database import engine
+from app.core.database_health import inspect_database
 from app.services.telegram_config_service import resolve_raw_values
 
 logger = logging.getLogger("startup_config")
@@ -65,6 +67,17 @@ def run_startup_checks(db: Session) -> dict[str, Any]:
         result["info"].append("Admin write protection is enabled")
     else:
         result["warning"].append("Admin write protection is disabled")
+
+    try:
+        database_health = inspect_database(engine)
+        if database_health["valid"]:
+            result["info"].append(
+                f"database integrity is valid at schema version {database_health['schema_version']}"
+            )
+        else:
+            result["fatal"].append("database integrity check failed")
+    except Exception:
+        result["fatal"].append("database integrity check could not be completed")
 
     for level, messages in result.items():
         log_method = getattr(logger, "error" if level == "fatal" else level)

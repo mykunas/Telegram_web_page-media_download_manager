@@ -445,6 +445,12 @@ docker compose up -d --build
 - 不要把真实 `.env` 上传到公开仓库
 - 不要公开 `API_ID`、`API_HASH`、手机号和 session 文件
 - 不要公开 `session/*.session`
+
+## SQLite migration 与备份
+
+启动时会自动运行带校验和的增量 migration，并执行数据库完整性检查。
+在线备份、验证和恢复演练说明见
+[`docs/database/BACKUP_AND_RECOVERY.md`](docs/database/BACKUP_AND_RECOVERY.md)。
 - 给下载目录预留足够磁盘空间
 - 如果部署在公网服务器，建议通过反向代理、登录鉴权或防火墙限制访问
 

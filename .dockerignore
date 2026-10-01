@@ -17,7 +17,11 @@ htmlcov/
 node_modules/
 frontend/
 docs/
-scripts/
+scripts/*
+!scripts/init-volume-permissions.sh
+!scripts/sqlite_backup.py
+!scripts/sqlite_restore.py
+!scripts/sqlite_health.py
 
 data/
 session/

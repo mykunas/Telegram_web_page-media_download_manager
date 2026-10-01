@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     """Bootstrap settings loaded from process environment and optional `.env`."""
 
     APP_NAME: str = "Telegram Media Downloader Backend"
-    APP_VERSION: str = "0.2.0"
+    APP_VERSION: str = "0.3.0"
     DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"
     DATABASE_URL: str = "sqlite:///./data/app.db"
