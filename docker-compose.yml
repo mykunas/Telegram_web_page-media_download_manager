@@ -1,19 +1,56 @@
-﻿services:
+x-python-build: &python-build
+  context: .
+  dockerfile: backend/Dockerfile
+  args:
+    PUID: "${PUID:-1000}"
+    PGID: "${PGID:-1000}"
+
+x-service-security: &service-security
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+x-json-logging: &json-logging
+  driver: json-file
+  options:
+    max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
+    max-file: "${DOCKER_LOG_MAX_FILE:-3}"
+
+services:
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    build: *python-build
+    image: telegram-media-python:${APP_IMAGE_TAG:-phase2}
     container_name: tg-media-backend
     restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
     env_file:
       - ./.env
-    ports:
-      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      DATABASE_URL: sqlite:////app/data/app.db
+      SESSION_NAME: "${SESSION_NAME:-/app/session/feiniu_user}"
+      DOWNLOAD_DIR: /app/downloads
+    expose:
+      - "8000"
     volumes:
       - ./data:/app/data
       - ./session:/app/session
-      - ${DOWNLOADS_VOLUME:-./downloads}:/downloads
+      - ${DOWNLOADS_VOLUME:-./downloads}:/app/downloads
       - ./logs/backend:/app/logs
+    tmpfs:
+      - /tmp:size=${BACKEND_TMPFS_SIZE:-128m},mode=1777
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    mem_limit: "${BACKEND_MEMORY_LIMIT:-512m}"
+    cpus: "${BACKEND_CPU_LIMIT:-1.0}"
+    pids_limit: ${BACKEND_PIDS_LIMIT:-256}
+    logging: *json-logging
+    <<: *service-security
     networks:
       - tg_media_net
 
@@ -21,43 +58,74 @@
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    image: telegram-media-frontend:${APP_IMAGE_TAG:-phase2}
     container_name: tg-media-frontend
     restart: unless-stopped
-    env_file:
-      - ./.env
+    init: true
+    stop_grace_period: 30s
     ports:
-      - "${FRONTEND_PORT:-3000}:80"
+      - "${FRONTEND_BIND_ADDRESS:-0.0.0.0}:${FRONTEND_PORT:-3000}:8080"
     depends_on:
-      - backend
-    volumes:
-      - ./logs/frontend:/var/log/nginx
+      backend:
+        condition: service_healthy
+    tmpfs:
+      - /tmp:size=${FRONTEND_TMPFS_SIZE:-32m},mode=1777
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: "${FRONTEND_MEMORY_LIMIT:-128m}"
+    cpus: "${FRONTEND_CPU_LIMIT:-0.5}"
+    pids_limit: ${FRONTEND_PIDS_LIMIT:-128}
+    logging: *json-logging
+    <<: *service-security
     networks:
       - tg_media_net
 
   worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    build: *python-build
+    image: telegram-media-python:${APP_IMAGE_TAG:-phase2}
     container_name: tg-media-worker
     restart: unless-stopped
+    init: true
+    stop_grace_period: 2m
     env_file:
       - ./.env
     environment:
-      - DATABASE_URL=sqlite:////workspace/data/app.db
-      - LOG_FILE=/workspace/logs/downloader.log
-      - HASH_INDEX_FILE=/workspace/app/hash_index.json
-    working_dir: /workspace
-    command: ["python", "app/downloader.py"]
+      DATABASE_URL: sqlite:////app/data/app.db
+      SESSION_NAME: "${SESSION_NAME:-/app/session/feiniu_user}"
+      DOWNLOAD_DIR: /app/downloads
+      LOG_FILE: /app/logs/downloader.log
+      HASH_INDEX_FILE: /app/data/hash_index.json
+    working_dir: /app/worker
+    command: ["python", "downloader.py"]
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     volumes:
-      - ./:/workspace
+      - ./data:/app/data
       - ./session:/app/session
-      - ${DOWNLOADS_VOLUME:-./downloads}:/downloads
-      - ./logs/worker:/workspace/logs
+      - ${DOWNLOADS_VOLUME:-./downloads}:/app/downloads
+      - ./logs/worker:/app/logs
+    tmpfs:
+      - /tmp:size=${WORKER_TMPFS_SIZE:-512m},mode=1777
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    mem_limit: "${WORKER_MEMORY_LIMIT:-1g}"
+    cpus: "${WORKER_CPU_LIMIT:-2.0}"
+    pids_limit: ${WORKER_PIDS_LIMIT:-512}
+    logging: *json-logging
+    <<: *service-security
     networks:
       - tg_media_net
 
 networks:
   tg_media_net:
+    name: tg_media_net
     driver: bridge

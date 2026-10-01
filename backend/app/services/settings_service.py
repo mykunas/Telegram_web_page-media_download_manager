@@ -29,7 +29,7 @@ def parse_value_by_type(value: str | None, value_type: str) -> Any:
         if value_type == "json":
             return json.loads(value)
     except Exception as exc:
-        raise AppException(f"invalid value for type '{value_type}': {exc}", status_code=400) from exc
+        raise AppException(f"invalid value for type '{value_type}'", status_code=400) from exc
 
     raise AppException(f"unsupported value_type: {value_type}", status_code=400)
 

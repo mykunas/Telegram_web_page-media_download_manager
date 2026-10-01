@@ -206,12 +206,11 @@ class DownloadService:
         try:
             return operation()
         except Exception as exc:
-            print(f"[DB ERROR] {operation_name}: {exc}")
             self.log_service.log_system(
                 "error",
                 "download_service",
                 f"Database operation failed: {operation_name}",
-                extra_json={"error": str(exc)},
+                extra_json={"error_type": exc.__class__.__name__},
             )
             return default
 
@@ -486,7 +485,8 @@ class DownloadService:
                 self.log_service.log_system(
                     "warning",
                     "download_service",
-                    f"waiting_record_poller error: {exc}",
+                    "Waiting-record poller failed",
+                    extra_json={"error_type": exc.__class__.__name__},
                 )
             finally:
                 await asyncio.sleep(5)
@@ -594,7 +594,8 @@ class DownloadService:
                 self.log_service.log_system(
                     "warning",
                     "download_service",
-                    f"Download attempt {attempt} failed for {self.message_key(message)}: {exc}",
+                    f"Download attempt {attempt} failed for {self.message_key(message)}",
+                    extra_json={"error_type": exc.__class__.__name__},
                 )
 
                 if attempt < self.config.max_retries:
@@ -604,7 +605,7 @@ class DownloadService:
                 self.mark_download_failed(
                     message,
                     retry_count=attempt,
-                    error_message=str(exc),
+                    error_message=f"Download failed ({exc.__class__.__name__})",
                 )
                 self.sync_service.record_download_result(int(message.chat.id), int(message.id), DownloadStatus.FAILED)
                 self.log_service.log_error(
@@ -613,7 +614,7 @@ class DownloadService:
                     message_id=int(message.id),
                     file_path=final_path,
                     error_type=exc.__class__.__name__,
-                    error_message=str(exc),
+                    error_message=f"Download failed ({exc.__class__.__name__})",
                     traceback_text=traceback.format_exc(),
                 )
                 return

@@ -1,9 +1,22 @@
 import os
 import sqlite3
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+# Reuse the backend registry so the worker has no independent defaults.
+_BACKEND_DIR = Path(__file__).resolve().parent.parent / "backend"
+if str(_BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_DIR))
+
+from app.core.config_registry import (  # noqa: E402
+    DATABASE_KEYS,
+    decode_storage_value,
+    encode_storage_value,
+    get_definition,
+)
 
 
 def _default_app_home() -> Path:
@@ -24,24 +37,18 @@ def _resolve_app_home() -> Path:
 
 
 def _load_env_file() -> Path:
-    """
-    Load env files with desktop-first strategy:
-    1) project root .env
-    2) runtime env (RUNTIME_ENV_FILE or <APP_HOME>/config/runtime.env)
-    """
+    """Load optional env files without overriding process/Docker environment."""
 
     project_root_env = Path(__file__).resolve().parent.parent / ".env"
     if project_root_env.exists():
-        load_dotenv(project_root_env, override=True)
+        load_dotenv(project_root_env, override=False)
 
     app_home = _resolve_app_home()
     runtime_env_path = Path(
         os.path.expandvars(os.getenv("RUNTIME_ENV_FILE", str(app_home / "config" / "runtime.env")))
     ).expanduser()
     if runtime_env_path.exists():
-        load_dotenv(runtime_env_path, override=True)
-
-    # Reload app_home because APP_HOME may be provided by .env/runtime.env.
+        load_dotenv(runtime_env_path, override=False)
     return _resolve_app_home()
 
 
@@ -49,49 +56,34 @@ def _load_settings_from_db() -> dict[str, str]:
     database_url = os.getenv("DATABASE_URL", "")
     if not database_url.startswith("sqlite:///"):
         return {}
-
-    db_path = database_url.replace("sqlite:///", "", 1)
-    if not db_path:
-        return {}
-
-    db_file = Path(db_path)
+    db_file = Path(database_url.replace("sqlite:///", "", 1))
     if not db_file.exists():
         return {}
 
-    keys = (
-        "API_ID",
-        "API_HASH",
-        "PHONE_NUMBER",
-        "SESSION_NAME",
-        "DOWNLOAD_DIR",
-        "TARGET_CHATS",
-        "ALLOW_EXTS",
-        "DOWNLOAD_HISTORY",
-        "HISTORY_LIMIT",
-        "MAX_RETRIES",
-        "RETRY_DELAY",
-        "MAX_FILE_SIZE_MB",
-        "HASH_INDEX_FILE",
-    )
-
     try:
-        conn = sqlite3.connect(db_file)
-        cur = conn.cursor()
-        placeholders = ",".join(["?"] * len(keys))
-        cur.execute(f"SELECT key, value FROM app_settings WHERE key IN ({placeholders})", keys)
-        rows = cur.fetchall()
-        conn.close()
+        with sqlite3.connect(db_file) as conn:
+            placeholders = ",".join(["?"] * len(DATABASE_KEYS))
+            rows = conn.execute(
+                f"SELECT key, value FROM app_settings WHERE key IN ({placeholders})",
+                DATABASE_KEYS,
+            ).fetchall()
     except Exception:
         return {}
-
     return {str(key): "" if value is None else str(value) for key, value in rows}
+
+
+def _default_raw(key: str) -> str:
+    definition = get_definition(key)
+    if definition.default in (None, ""):
+        return ""
+    return encode_storage_value(key, definition.default)
 
 
 @dataclass(slots=True)
 class RuntimeConfig:
     api_id: int
     api_hash: str
-    phone_number: str | None
+    phone_number: str
     session_name: str
     download_dir: str
     target_chats: list[str]
@@ -104,45 +96,41 @@ class RuntimeConfig:
     hash_index_file: str
 
 
-def _resolve_path(value: str, app_home: Path) -> Path:
-    path = Path(os.path.expandvars(value)).expanduser()
-    if path.is_absolute():
-        return path
-    return (app_home / path).resolve()
-
-
 def load_runtime_config() -> RuntimeConfig:
-    app_home = _load_env_file()
-    app_home.mkdir(parents=True, exist_ok=True)
-
+    _load_env_file()
     db_settings = _load_settings_from_db()
 
-    def _get(key: str, default: str) -> str:
+    def resolved(key: str):
         raw = db_settings.get(key)
-        if raw is not None and str(raw).strip() != "":
-            return str(raw)
-        return os.getenv(key, default)
+        if raw is None or not raw.strip():
+            raw = os.getenv(key, "")
+        if raw is None or not str(raw).strip():
+            raw = _default_raw(key)
+        return decode_storage_value(key, raw)
 
-    session_name_path = _resolve_path(_get("SESSION_NAME", str(app_home / "session" / "telegram_user")), app_home)
-    download_dir_path = _resolve_path(_get("DOWNLOAD_DIR", str(app_home / "downloads")), app_home)
-    hash_index_file_path = _resolve_path(_get("HASH_INDEX_FILE", str(app_home / "data" / "hash_index.json")), app_home)
+    session_name = resolved("SESSION_NAME")
+    download_dir = resolved("DOWNLOAD_DIR")
+    hash_index_file = decode_storage_value(
+        "HASH_INDEX_FILE",
+        os.getenv("HASH_INDEX_FILE", _default_raw("HASH_INDEX_FILE")),
+    )
 
-    session_name_path.parent.mkdir(parents=True, exist_ok=True)
-    download_dir_path.mkdir(parents=True, exist_ok=True)
-    hash_index_file_path.parent.mkdir(parents=True, exist_ok=True)
+    Path(session_name).parent.mkdir(parents=True, exist_ok=True)
+    Path(download_dir).mkdir(parents=True, exist_ok=True)
+    Path(hash_index_file).parent.mkdir(parents=True, exist_ok=True)
 
     return RuntimeConfig(
-        api_id=int(_get("API_ID", "0")),
-        api_hash=_get("API_HASH", ""),
-        phone_number=_get("PHONE_NUMBER", ""),
-        session_name=str(session_name_path),
-        download_dir=str(download_dir_path),
-        target_chats=[x.strip() for x in _get("TARGET_CHATS", "").split(",") if x.strip()],
-        allow_exts=[x.lower().strip() for x in _get("ALLOW_EXTS", ".mp4,.jpg,.jpeg,.png,.webp").split(",") if x.strip()],
-        download_history=_get("DOWNLOAD_HISTORY", "true").lower() == "true",
-        history_limit=int(_get("HISTORY_LIMIT", "200")),
-        max_retries=int(_get("MAX_RETRIES", "3")),
-        retry_delay=int(_get("RETRY_DELAY", "5")),
-        max_file_size_mb=int(_get("MAX_FILE_SIZE_MB", "0")),
-        hash_index_file=str(hash_index_file_path),
+        api_id=resolved("API_ID"),
+        api_hash=resolved("API_HASH"),
+        phone_number=resolved("PHONE_NUMBER"),
+        session_name=session_name,
+        download_dir=download_dir,
+        target_chats=resolved("TARGET_CHATS"),
+        allow_exts=resolved("ALLOW_EXTS"),
+        download_history=resolved("DOWNLOAD_HISTORY"),
+        history_limit=resolved("HISTORY_LIMIT"),
+        max_retries=resolved("MAX_RETRIES"),
+        retry_delay=resolved("RETRY_DELAY"),
+        max_file_size_mb=resolved("MAX_FILE_SIZE_MB"),
+        hash_index_file=hash_index_file,
     )

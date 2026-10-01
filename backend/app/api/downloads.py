@@ -421,7 +421,7 @@ def download_record_thumbnail(record_id: int, db: Session = Depends(get_db)):
         try:
             _generate_video_thumbnail(video_path, thumbnail_path)
         except Exception as exc:
-            raise AppException(f"failed to generate thumbnail: {exc}", status_code=500) from exc
+            raise AppException("failed to generate thumbnail", status_code=500) from exc
 
     return FileResponse(
         path=str(thumbnail_path),

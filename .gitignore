@@ -12,6 +12,9 @@ build/
 develop-eggs/
 dist/
 downloads/
+data/
+logs/
+backup-phase1*/
 eggs/
 .eggs/
 lib/
@@ -128,9 +131,30 @@ frontend/node_modules/
 
 # Session files
 session/
+*.session
+*.session-journal
+*.session-wal
+*.session-shm
+*.db
+*.sqlite
+*.sqlite3
+
+# Runtime state
+app/hash_index.json
+
+# Local secrets; commit only the example file.
+.env
+.env.*
+!.env.example
 
 # Tools
 tools/
+
+# Generated deployment archives must never contain or track runtime data.
+*.tar
+*.tar.gz
+*.tgz
+*.zip
 
 # Docker volumes (if any)
 volumes/

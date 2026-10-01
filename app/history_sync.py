@@ -105,7 +105,7 @@ class HistorySyncTask:
                 module="history_sync",
                 chat_id=chat_id if chat_id is not None else 0,
                 error_type=exc.__class__.__name__,
-                error_message=f"History scan failed for {chat_ref}: {exc}",
+                error_message=f"History scan failed for {chat_ref}",
                 traceback_text=traceback.format_exc(),
             )
             return {

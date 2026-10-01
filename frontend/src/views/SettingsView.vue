@@ -50,23 +50,31 @@
 
           <el-form label-position="top" class="form-grid">
             <el-form-item label="接口 ID (API_ID)">
-              <el-input v-model.trim="telegramForm.API_ID" placeholder="请输入 API_ID" />
+              <el-tag effect="plain">{{ telegramMeta.API_ID.masked || '未配置' }}</el-tag>
+              <el-input v-if="editingCredentials" v-model.trim="telegramForm.API_ID" placeholder="留空保持现有值" />
             </el-form-item>
             <el-form-item label="接口密钥 (API_HASH)">
-              <el-input v-model.trim="telegramForm.API_HASH" placeholder="请输入 API_HASH" />
+              <el-tag :type="telegramMeta.API_HASH.configured ? 'success' : 'warning'" effect="plain">
+                {{ telegramMeta.API_HASH.configured ? `已配置 ${telegramMeta.API_HASH.masked}` : '未配置' }}
+              </el-tag>
+              <el-input v-if="editingCredentials" v-model.trim="telegramForm.API_HASH" type="password" autocomplete="new-password" placeholder="留空保持现有 API Hash" />
             </el-form-item>
             <el-form-item label="手机号 (PHONE_NUMBER)">
-              <el-input v-model.trim="telegramForm.PHONE_NUMBER" placeholder="例如 +8613812345678" />
+              <el-tag effect="plain">{{ telegramMeta.PHONE_NUMBER.masked || '未配置' }}</el-tag>
+              <el-input v-if="editingCredentials" v-model.trim="telegramForm.PHONE_NUMBER" autocomplete="off" placeholder="留空保持现有手机号" />
             </el-form-item>
             <el-form-item label="会话名 (SESSION_NAME)">
-              <el-input v-model.trim="telegramForm.SESSION_NAME" placeholder="例如 /app/session/telegram_user" />
+              <el-tag effect="plain">{{ telegramMeta.SESSION_NAME.configured ? '已配置' : '未配置' }}</el-tag>
+              <el-input v-if="editingCredentials" v-model.trim="telegramForm.SESSION_NAME" placeholder="留空保持现有会话路径" />
             </el-form-item>
           </el-form>
 
           <div class="action-row">
+            <el-button @click="editingCredentials = !editingCredentials">{{ editingCredentials ? '取消更换' : '更换凭据' }}</el-button>
             <el-button type="primary" :loading="authStarting" @click="saveAndStartAuth">保存并开始授权</el-button>
             <el-button :loading="statusChecking" @click="checkAuthStatus">检查授权状态</el-button>
             <el-button type="danger" plain :loading="disconnecting" @click="disconnectSession">断开会话</el-button>
+            <el-button type="danger" plain :loading="deletingSession" @click="deleteSession">删除 Session</el-button>
           </div>
 
           <div class="verify-panel">
@@ -74,7 +82,7 @@
             <div class="verify-row">
               <el-input v-model.trim="verifyCode" placeholder="请输入验证码" clearable />
               <el-button :loading="submittingCode" @click="submitCode">提交验证码</el-button>
-              <el-input v-model.trim="twoFactorPassword" placeholder="请输入二步验证码" show-password clearable />
+              <el-input v-model.trim="twoFactorPassword" type="password" autocomplete="one-time-code" placeholder="请输入二步验证码" clearable />
               <el-button :loading="submittingPassword" @click="submitPassword">提交二步验证码</el-button>
             </div>
           </div>
@@ -199,11 +207,23 @@
             <el-descriptions-item label="授权步骤">{{ sessionStatus.step || '-' }}</el-descriptions-item>
             <el-descriptions-item label="是否已授权">{{ sessionStatus.authorized ? '已授权' : '未授权' }}</el-descriptions-item>
             <el-descriptions-item label="手机号">{{ sessionStatus.phone_number || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="会话名">{{ sessionStatus.session_name || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="Session 文件">{{ sessionStatus.session_exists ? '已存在' : '不存在' }}</el-descriptions-item>
             <el-descriptions-item label="用户">{{ sessionStatus.user_name || '-' }}</el-descriptions-item>
             <el-descriptions-item label="用户 ID">{{ sessionStatus.user_id || '-' }}</el-descriptions-item>
             <el-descriptions-item label="状态说明" :span="2">{{ sessionStatus.message || '-' }}</el-descriptions-item>
           </el-descriptions>
+
+          <div class="block-title" style="margin: 18px 0 10px">安全状态</div>
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="Telegram 凭据">{{ securityStatus.telegram_credentials_configured ? '已配置' : '未完整配置' }}</el-descriptions-item>
+            <el-descriptions-item label="Telegram Session">{{ securityStatus.session_exists ? '已存在' : '不存在' }}</el-descriptions-item>
+            <el-descriptions-item label="Debug">{{ securityStatus.debug_enabled ? '已开启（仅限开发）' : '已关闭' }}</el-descriptions-item>
+            <el-descriptions-item label="管理写保护">{{ securityStatus.admin_protection_enabled ? '已启用' : '未启用（仅限可信局域网）' }}</el-descriptions-item>
+            <el-descriptions-item label="配置校验" :span="2">{{ securityStatus.config_validation_status || '-' }}</el-descriptions-item>
+          </el-descriptions>
+          <el-form-item v-if="securityStatus.admin_protection_enabled" label="管理员 Token（仅保存在当前页面内存）" style="margin-top: 12px">
+            <el-input v-model="adminToken" type="password" autocomplete="off" placeholder="刷新页面后需重新输入" @input="updateAdminToken" />
+          </el-form-item>
         </el-card>
       </section>
     </div>
@@ -212,9 +232,9 @@
 
 <script setup>
 import { computed, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
-import http from '@/api/http'
+import http, { setAdminToken } from '@/api/http'
 
 const loading = ref(false)
 const authStarting = ref(false)
@@ -222,6 +242,9 @@ const submittingCode = ref(false)
 const submittingPassword = ref(false)
 const statusChecking = ref(false)
 const disconnecting = ref(false)
+const deletingSession = ref(false)
+const editingCredentials = ref(false)
+const adminToken = ref('')
 const savingDownload = ref(false)
 const savingAll = ref(false)
 const preferencesLoading = ref(false)
@@ -235,7 +258,14 @@ const telegramForm = reactive({
   API_ID: '',
   API_HASH: '',
   PHONE_NUMBER: '',
-  SESSION_NAME: '/app/session/telegram_user'
+  SESSION_NAME: ''
+})
+
+const telegramMeta = reactive({
+  API_ID: { configured: false, masked: '' },
+  API_HASH: { configured: false, masked: '' },
+  PHONE_NUMBER: { configured: false, masked: '' },
+  SESSION_NAME: { configured: false, masked: '' }
 })
 
 const downloadForm = reactive({
@@ -254,9 +284,17 @@ const sessionStatus = reactive({
   authorized: false,
   message: '未开始授权',
   phone_number: '',
-  session_name: '',
+  session_exists: false,
   user_id: '',
   user_name: ''
+})
+
+const securityStatus = reactive({
+  telegram_credentials_configured: false,
+  session_exists: false,
+  debug_enabled: false,
+  admin_protection_enabled: false,
+  config_validation_status: ''
 })
 
 const preferenceState = reactive({
@@ -297,10 +335,13 @@ const parseApiData = (resp) => {
 const apiErrorMessage = (error, fallback) => error?.response?.data?.message || error?.message || fallback
 
 const assignTelegram = (data = {}) => {
-  telegramForm.API_ID = data.API_ID || ''
-  telegramForm.API_HASH = data.API_HASH || ''
-  telegramForm.PHONE_NUMBER = data.PHONE_NUMBER || ''
-  telegramForm.SESSION_NAME = data.SESSION_NAME || '/app/session/telegram_user'
+  for (const key of ['API_ID', 'API_HASH', 'PHONE_NUMBER', 'SESSION_NAME']) {
+    telegramMeta[key] = {
+      configured: Boolean(data[key]?.configured),
+      masked: data[key]?.masked || ''
+    }
+    telegramForm[key] = ''
+  }
 }
 
 const assignDownload = (data = {}) => {
@@ -319,10 +360,20 @@ const assignSessionStatus = (data = {}) => {
   sessionStatus.authorized = Boolean(data.authorized)
   sessionStatus.message = data.message || ''
   sessionStatus.phone_number = data.phone_number || ''
-  sessionStatus.session_name = data.session_name || ''
+  sessionStatus.session_exists = Boolean(data.session_exists)
   sessionStatus.user_id = data.user_id || ''
   sessionStatus.user_name = data.user_name || ''
 }
+
+const assignSecurityStatus = (data = {}) => {
+  securityStatus.telegram_credentials_configured = Boolean(data.telegram_credentials_configured)
+  securityStatus.session_exists = Boolean(data.session_exists)
+  securityStatus.debug_enabled = Boolean(data.debug_enabled)
+  securityStatus.admin_protection_enabled = Boolean(data.admin_protection_enabled)
+  securityStatus.config_validation_status = data.config_validation_status || ''
+}
+
+const updateAdminToken = (value) => setAdminToken(value)
 
 const assignPreferences = (data = {}) => {
   preferenceState.updated_at = data.updated_at ? String(data.updated_at).slice(0, 19).replace('T', ' ') : ''
@@ -396,6 +447,7 @@ const loadAll = async () => {
     assignTelegram(data.telegram || {})
     assignDownload(data.download || {})
     assignSessionStatus(data.session_status || {})
+    assignSecurityStatus(data.security_status || {})
   } catch (error) {
     ElMessage.error(apiErrorMessage(error, '加载配置失败'))
   } finally {
@@ -405,7 +457,8 @@ const loadAll = async () => {
 
 const saveTelegram = async () => {
   const data = parseApiData(await http.put('/telegram-config/telegram', { ...telegramForm }))
-  assignTelegram(data)
+  assignTelegram(data.config || {})
+  editingCredentials.value = false
 }
 
 const saveAndStartAuth = async () => {
@@ -435,6 +488,7 @@ const submitCode = async () => {
   } catch (error) {
     ElMessage.error(apiErrorMessage(error, '提交验证码失败'))
   } finally {
+    verifyCode.value = ''
     submittingCode.value = false
   }
 }
@@ -452,6 +506,7 @@ const submitPassword = async () => {
   } catch (error) {
     ElMessage.error(apiErrorMessage(error, '提交二步验证密码失败'))
   } finally {
+    twoFactorPassword.value = ''
     submittingPassword.value = false
   }
 }
@@ -482,6 +537,29 @@ const disconnectSession = async () => {
   }
 }
 
+const deleteSession = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '这会永久删除 Telegram Session。请先停止 worker；删除后需要重新登录。',
+      '确认删除 Session',
+      { type: 'warning', confirmButtonText: '永久删除', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  deletingSession.value = true
+  try {
+    const status = parseApiData(await http.delete('/telegram-config/session', { data: { confirm: 'DELETE_SESSION' } }))
+    assignSessionStatus(status)
+    await loadAll()
+    ElMessage.success('Session 已删除')
+  } catch (error) {
+    ElMessage.error(apiErrorMessage(error, '删除 Session 失败'))
+  } finally {
+    deletingSession.value = false
+  }
+}
+
 const saveDownload = async (options = {}) => {
   const { silent = false } = options
   savingDownload.value = true
@@ -497,7 +575,7 @@ const saveDownload = async (options = {}) => {
       MAX_FILE_SIZE_MB: downloadForm.MAX_FILE_SIZE_MB
     }
     const data = parseApiData(await http.put('/telegram-config/download', payload))
-    assignDownload(data)
+    assignDownload(data.config || {})
     if (!silent) ElMessage.success('下载配置已保存')
   } catch (error) {
     ElMessage.error(apiErrorMessage(error, '保存下载配置失败'))

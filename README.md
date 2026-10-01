@@ -291,6 +291,14 @@ docker compose restart backend
 docker compose down
 ```
 
+## Phase 2 安全配置
+
+- Telegram Secret 的 GET 接口只返回已配置状态和脱敏值，空字段表示保留原值。
+- “断开会话”不会删除 Session；永久删除必须在设置页二次确认。
+- 可通过 `ADMIN_AUTH_ENABLED` 和 `ADMIN_API_TOKEN_HASH` 启用管理写操作保护。
+- 配置优先级、Secret 边界、备份和迁移步骤见 [`docs/security/`](docs/security/)。
+- 曾包含 `.env`/Session 的旧部署归档不可继续作为公开部署包使用。
+
 重新构建并启动：
 
 ```bash

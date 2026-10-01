@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from backend_db import ErrorLog, SystemLog, db_session_scope
+from app.core.security import sanitize_for_log, sanitize_text
 
 
 class AppLogger:
@@ -42,6 +43,8 @@ class AppLogger:
             self._logger.addHandler(file_handler)
 
     def _db_write_system(self, level: str, module: str, message: str, extra_json: dict[str, Any] | None) -> None:
+        message = sanitize_text(message)
+        extra_json = sanitize_for_log(extra_json) if extra_json is not None else None
         try:
             with db_session_scope() as db:
                 db.add(
@@ -54,7 +57,7 @@ class AppLogger:
                     )
                 )
         except Exception as exc:
-            self._logger.error("DB write system log failed: %s", exc)
+            self._logger.error("DB write system log failed: %s", sanitize_text(exc))
 
     def _db_write_error(
         self,
@@ -66,6 +69,9 @@ class AppLogger:
         message_id: int | None,
         file_path: str | None,
     ) -> None:
+        error_message = sanitize_text(error_message)
+        traceback_text = sanitize_text(traceback_text) if traceback_text else None
+        file_path = sanitize_text(file_path) if file_path else None
         try:
             with db_session_scope() as db:
                 db.add(
@@ -82,18 +88,20 @@ class AppLogger:
                     )
                 )
         except Exception as exc:
-            self._logger.error("DB write error log failed: %s", exc)
+            self._logger.error("DB write error log failed: %s", sanitize_text(exc))
 
     def _emit(self, level: int, module: str, message: str, extra_json: dict[str, Any] | None = None) -> None:
+        safe_message = sanitize_text(message)
+        safe_extra = sanitize_for_log(extra_json) if extra_json is not None else None
         payload = {
             "level": logging.getLevelName(level),
             "module": module,
-            "message": message,
-            "extra_json": extra_json,
+            "message": safe_message,
+            "extra_json": safe_extra,
         }
 
         self._logger.log(level, json.dumps(payload, ensure_ascii=False))
-        self._db_write_system(payload["level"], module, message, extra_json)
+        self._db_write_system(payload["level"], module, safe_message, safe_extra)
 
     def log_info(self, module: str, message: str, extra_json: dict[str, Any] | None = None) -> None:
         self._emit(logging.INFO, module, message, extra_json)
@@ -115,6 +123,9 @@ class AppLogger:
     ) -> None:
         resolved_error_type = error_type or (exc.__class__.__name__ if exc else "Error")
         resolved_traceback = traceback_text or (traceback.format_exc() if exc else None)
+        resolved_traceback = sanitize_text(resolved_traceback) if resolved_traceback else None
+        message = sanitize_text(message)
+        file_path = sanitize_text(file_path) if file_path else None
 
         merged_extra = dict(extra_json or {})
         merged_extra.update(

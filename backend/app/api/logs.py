@@ -1,14 +1,17 @@
 ﻿from __future__ import annotations
 
 from datetime import datetime, timedelta
+from pathlib import PurePath
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.config import settings
 from app.core.exceptions import AppException
 from app.core.response import paginated_response, success_response
+from app.core.security import sanitize_for_log, sanitize_text
 from app.models import ErrorLog, SystemLog
 from app.schemas.log import ErrorLogOut, ErrorResolveOut, SystemLogOut
 
@@ -58,8 +61,8 @@ def list_system_logs(
             id=row.id,
             level=row.level,
             module=row.module,
-            message=row.message,
-            extra_json=row.extra_json,
+            message=sanitize_text(row.message),
+            extra_json=sanitize_for_log(row.extra_json),
             created_at=row.created_at,
         ).model_dump(mode="json")
         for row in rows
@@ -114,10 +117,10 @@ def list_error_logs(
             module=row.module,
             chat_id=row.chat_id,
             message_id=row.message_id,
-            file_path=row.file_path,
+            file_path=PurePath(row.file_path).name if row.file_path else None,
             error_type=row.error_type,
-            error_message=row.error_message,
-            traceback=row.traceback,
+            error_message=sanitize_text(row.error_message),
+            traceback=sanitize_text(row.traceback) if settings.DEBUG and row.traceback else None,
             resolved=row.resolved,
             created_at=row.created_at,
         ).model_dump(mode="json")

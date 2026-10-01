@@ -61,7 +61,7 @@ class RealtimeListener:
                 chat_id=chat_id,
                 message_id=message_id,
                 error_type=exc.__class__.__name__,
-                error_message=f"Failed to process live message {key}: {exc}",
+                error_message=f"Failed to process live message {key}",
                 traceback_text=traceback.format_exc(),
             )
             return False

@@ -81,13 +81,14 @@ class TelegramService:
                 self.log_service.log_system(
                     "warning",
                     "telegram_service",
-                    f"History download failed (attempt {attempt}/{attempts}): {exc}",
+                    f"History download failed (attempt {attempt}/{attempts})",
+                    extra_json={"error_type": exc.__class__.__name__},
                 )
                 if attempt >= attempts:
                     self.log_service.log_error(
                         module="telegram_service",
                         error_type=exc.__class__.__name__,
-                        error_message=f"History download aborted after {attempts} attempts: {exc}",
+                        error_message=f"History download aborted after {attempts} attempts",
                     )
                     return
                 await asyncio.sleep(min(5 * attempt, 20))
@@ -110,7 +111,8 @@ class TelegramService:
                 self.log_service.log_system(
                     "warning",
                     "telegram_service",
-                    f"Failed to fetch message {chat_id}:{message_id} (attempt {attempt}/{attempts}): {exc}",
+                    f"Failed to fetch message {chat_id}:{message_id} (attempt {attempt}/{attempts})",
+                    extra_json={"error_type": exc.__class__.__name__},
                 )
                 if attempt < attempts:
                     await asyncio.sleep(attempt)

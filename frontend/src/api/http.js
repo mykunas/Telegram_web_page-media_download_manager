@@ -38,4 +38,18 @@ const http = axios.create({
   timeout: 10000
 })
 
+// Intentionally memory-only. Never persist an admin token in browser storage.
+let adminToken = ''
+
+export function setAdminToken(value) {
+  adminToken = typeof value === 'string' ? value.trim() : ''
+}
+
+http.interceptors.request.use((config) => {
+  if (adminToken && !['get', 'head', 'options'].includes(String(config.method || 'get').toLowerCase())) {
+    config.headers.Authorization = `Bearer ${adminToken}`
+  }
+  return config
+})
+
 export default http

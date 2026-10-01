@@ -225,7 +225,7 @@ class ConsistencyCheckService:
             self.log_service.log_error(
                 module="consistency_check",
                 error_type=exc.__class__.__name__,
-                error_message=f"Consistency check failed for {chat_ref}: {exc}",
+                error_message=f"Consistency check failed for {chat_ref}",
                 traceback_text=traceback.format_exc(),
             )
             raise

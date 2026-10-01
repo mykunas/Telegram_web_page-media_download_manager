@@ -48,7 +48,7 @@ class SyncService:
             self.log_service.log_error(
                 module="sync_service",
                 error_type=exc.__class__.__name__,
-                error_message=f"Failed to update sync status for chat {chat_id}: {exc}",
+                error_message=f"Failed to update sync status for chat {chat_id}",
                 chat_id=chat_id,
             )
             return False
@@ -122,7 +122,7 @@ class SyncService:
             self.log_service.log_error(
                 module="sync_service",
                 error_type=exc.__class__.__name__,
-                error_message=f"Failed to query sync status for chat {chat_id}: {exc}",
+                error_message=f"Failed to query sync status for chat {chat_id}",
                 chat_id=chat_id,
             )
             return None

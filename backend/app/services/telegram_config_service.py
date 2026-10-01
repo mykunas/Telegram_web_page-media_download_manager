@@ -1,51 +1,30 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from pathlib import Path
+from typing import Any, Iterable
 
 from sqlalchemy.orm import Session
 
+from app.core.config_registry import (
+    CONFIG_REGISTRY,
+    DATABASE_KEYS,
+    DOWNLOAD_KEYS,
+    TELEGRAM_KEYS,
+    decode_storage_value,
+    encode_storage_value,
+    get_definition,
+    validate_config_value,
+    validate_update_batch,
+)
 from app.core.exceptions import AppException
+from app.core.security import secret_metadata
 from app.models import AppSetting
 
 
-@dataclass(frozen=True)
-class SettingSpec:
-    default: str | None
-    value_type: str
-    description: str
-
-
-TELEGRAM_SETTING_SPECS: dict[str, SettingSpec] = {
-    "API_ID": SettingSpec(default="", value_type="string", description="Telegram API ID"),
-    "API_HASH": SettingSpec(default="", value_type="string", description="Telegram API HASH"),
-    "PHONE_NUMBER": SettingSpec(default="", value_type="string", description="Telegram 登录手机号"),
-    "SESSION_NAME": SettingSpec(default="/app/session/telegram_user", value_type="string", description="Telegram 会话名"),
-}
-
-DOWNLOAD_SETTING_SPECS: dict[str, SettingSpec] = {
-    "DOWNLOAD_DIR": SettingSpec(default="/downloads", value_type="string", description="下载目录"),
-    "TARGET_CHATS": SettingSpec(default="", value_type="string", description="目标频道/群组，逗号分隔"),
-    "ALLOW_EXTS": SettingSpec(
-        default=".mp4,.mkv,.mov,.avi,.jpg,.jpeg,.png,.webp",
-        value_type="string",
-        description="允许下载的后缀名，逗号分隔",
-    ),
-    "DOWNLOAD_HISTORY": SettingSpec(default="true", value_type="boolean", description="是否下载历史消息"),
-    "HISTORY_LIMIT": SettingSpec(default="2000", value_type="integer", description="历史消息下载上限"),
-    "MAX_RETRIES": SettingSpec(default="3", value_type="integer", description="下载失败重试次数"),
-    "RETRY_DELAY": SettingSpec(default="5", value_type="integer", description="每次重试等待秒数"),
-    "MAX_FILE_SIZE_MB": SettingSpec(default="0", value_type="integer", description="最大文件大小（MB，0 表示不限制）"),
-}
-
-ALL_SETTING_SPECS: dict[str, SettingSpec] = {
-    **TELEGRAM_SETTING_SPECS,
-    **DOWNLOAD_SETTING_SPECS,
-}
-
-
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TelegramAuthConfig:
     api_id: int
     api_hash: str
@@ -57,20 +36,33 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def ensure_required_settings(db: Session) -> dict[str, AppSetting]:
-    keys = list(ALL_SETTING_SPECS.keys())
-    rows = db.query(AppSetting).filter(AppSetting.key.in_(keys)).all()
-    row_map = {row.key: row for row in rows}
+def _default_storage_value(key: str) -> str:
+    definition = get_definition(key)
+    if definition.default in (None, ""):
+        return ""
+    return encode_storage_value(key, definition.default)
 
+
+def ensure_required_settings(
+    db: Session,
+    keys: Iterable[str] = DATABASE_KEYS,
+    *,
+    commit: bool = True,
+) -> dict[str, AppSetting]:
+    resolved_keys = tuple(keys)
+    rows = db.query(AppSetting).filter(AppSetting.key.in_(resolved_keys)).all()
+    row_map = {row.key: row for row in rows}
     created = False
-    for key, spec in ALL_SETTING_SPECS.items():
+
+    for key in resolved_keys:
         if key in row_map:
             continue
+        definition = get_definition(key)
         row = AppSetting(
             key=key,
-            value=spec.default,
-            value_type=spec.value_type,
-            description=spec.description,
+            value=_default_storage_value(key),
+            value_type=definition.value_type,
+            description=definition.description,
             updated_at=_now(),
         )
         db.add(row)
@@ -78,72 +70,147 @@ def ensure_required_settings(db: Session) -> dict[str, AppSetting]:
         row_map[key] = row
         created = True
 
-    if created:
+    if created and commit:
         db.commit()
     return row_map
 
 
-def _safe_str(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(value)
+def resolve_raw_values(db: Session, keys: Iterable[str]) -> dict[str, str]:
+    resolved_keys = tuple(keys)
+    row_map = ensure_required_settings(db, resolved_keys)
+    values: dict[str, str] = {}
+    for key in resolved_keys:
+        db_value = row_map[key].value
+        if db_value is not None and str(db_value).strip() != "":
+            values[key] = str(db_value)
+            continue
+        env_value = os.getenv(key)
+        if env_value is not None and env_value.strip() != "":
+            values[key] = env_value
+            continue
+        values[key] = _default_storage_value(key)
+    return values
 
 
-def read_group_values(db: Session, specs: dict[str, SettingSpec]) -> dict[str, str]:
-    row_map = ensure_required_settings(db)
-    return {key: _safe_str(row_map[key].value) for key in specs}
+def read_group_values(db: Session, keys: Iterable[str]) -> dict[str, Any]:
+    raw_values = resolve_raw_values(db, keys)
+    return {key: decode_storage_value(key, raw_values[key]) for key in raw_values}
 
 
 def read_download_values(db: Session) -> dict[str, Any]:
-    values = read_group_values(db, DOWNLOAD_SETTING_SPECS)
+    values = read_group_values(db, DOWNLOAD_KEYS)
     return {
         "DOWNLOAD_DIR": values["DOWNLOAD_DIR"],
-        "TARGET_CHATS": values["TARGET_CHATS"],
-        "ALLOW_EXTS": values["ALLOW_EXTS"],
-        "DOWNLOAD_HISTORY": values["DOWNLOAD_HISTORY"].strip().lower() in {"1", "true", "yes", "on"},
-        "HISTORY_LIMIT": int(values["HISTORY_LIMIT"] or 0),
-        "MAX_RETRIES": int(values["MAX_RETRIES"] or 0),
-        "RETRY_DELAY": int(values["RETRY_DELAY"] or 0),
-        "MAX_FILE_SIZE_MB": int(values["MAX_FILE_SIZE_MB"] or 0),
+        "TARGET_CHATS": ",".join(values["TARGET_CHATS"]),
+        "ALLOW_EXTS": ",".join(values["ALLOW_EXTS"]),
+        "DOWNLOAD_HISTORY": values["DOWNLOAD_HISTORY"],
+        "HISTORY_LIMIT": values["HISTORY_LIMIT"],
+        "MAX_RETRIES": values["MAX_RETRIES"],
+        "RETRY_DELAY": values["RETRY_DELAY"],
+        "MAX_FILE_SIZE_MB": values["MAX_FILE_SIZE_MB"],
     }
 
 
-def save_group_values(db: Session, values: dict[str, Any], specs: dict[str, SettingSpec]) -> dict[str, str]:
-    row_map = ensure_required_settings(db)
+def read_telegram_public_view(db: Session) -> dict[str, Any]:
+    values = resolve_raw_values(db, TELEGRAM_KEYS)
+    session_name = values["SESSION_NAME"]
+    session_file = Path(f"{session_name}.session") if session_name else None
+    return {
+        "API_ID": secret_metadata(values["API_ID"], kind="api_id"),
+        "API_HASH": secret_metadata(values["API_HASH"]),
+        "PHONE_NUMBER": secret_metadata(values["PHONE_NUMBER"], kind="phone"),
+        "SESSION_NAME": secret_metadata(session_name, kind="session"),
+        "session_exists": bool(session_file and session_file.is_file()),
+    }
+
+
+def _write_normalized_values(db: Session, normalized: dict[str, str]) -> dict[str, AppSetting]:
+    row_map = ensure_required_settings(db, normalized.keys(), commit=False)
     now = _now()
+    try:
+        for key, value in normalized.items():
+            definition = get_definition(key)
+            row = row_map[key]
+            row.value = value
+            row.value_type = definition.value_type
+            row.description = definition.description
+            row.updated_at = now
+        db.commit()
+        for key in normalized:
+            db.refresh(row_map[key])
+    except Exception:
+        db.rollback()
+        raise
+    return row_map
 
-    for key, raw_value in values.items():
-        if key not in specs:
-            raise AppException(f"unsupported setting key: {key}", status_code=400)
-        row = row_map[key]
-        row.value = None if raw_value is None else str(raw_value)
-        row.value_type = specs[key].value_type
-        row.description = specs[key].description
-        row.updated_at = now
 
-    db.commit()
-    return {key: _safe_str(row_map[key].value) for key in specs}
+def save_runtime_values(db: Session, values: dict[str, Any]) -> dict[str, Any]:
+    normalized = validate_update_batch(values, allow_secrets=False)
+    try:
+        _write_normalized_values(db, normalized)
+    except AppException:
+        raise
+    except Exception as exc:
+        raise AppException("configuration update failed", status_code=500) from exc
+    return read_download_values(db)
+
+
+def save_secret_values(db: Session, values: dict[str, Any]) -> list[str]:
+    # Write-only semantics: an omitted, null or empty field keeps the old value.
+    replacements = {
+        key: value
+        for key, value in values.items()
+        if key in TELEGRAM_KEYS and value is not None and str(value).strip() != ""
+    }
+    if not replacements:
+        return []
+
+    normalized = validate_update_batch(replacements, allow_secrets=True)
+    try:
+        _write_normalized_values(db, normalized)
+    except AppException:
+        raise
+    except Exception as exc:
+        raise AppException("credential update failed", status_code=500) from exc
+    return list(normalized.keys())
+
+
+def clear_secret_values(db: Session, keys: Iterable[str]) -> list[str]:
+    resolved_keys = tuple(keys)
+    for key in resolved_keys:
+        definition = get_definition(key)
+        if not definition.secret or key not in TELEGRAM_KEYS:
+            raise AppException(f"secret cannot be cleared through this API: {key}", status_code=400)
+    row_map = ensure_required_settings(db, resolved_keys, commit=False)
+    try:
+        for key in resolved_keys:
+            row_map[key].value = ""
+            row_map[key].updated_at = _now()
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise AppException("credential clear failed", status_code=500) from exc
+    return list(resolved_keys)
 
 
 def build_telegram_auth_config(db: Session) -> TelegramAuthConfig:
-    values = read_group_values(db, TELEGRAM_SETTING_SPECS)
+    values = resolve_raw_values(db, TELEGRAM_KEYS)
+    missing = [key for key, value in values.items() if not str(value).strip()]
+    if missing:
+        raise AppException("Telegram credentials are incomplete", status_code=400)
 
-    api_id_raw = values["API_ID"].strip()
-    api_hash = values["API_HASH"].strip()
-    phone_number = values["PHONE_NUMBER"].strip()
-    session_name = values["SESSION_NAME"].strip()
-
-    if not api_id_raw or not api_hash or not phone_number or not session_name:
-        raise AppException("请先完整配置 API_ID、API_HASH、PHONE_NUMBER、SESSION_NAME", status_code=400)
-
-    try:
-        api_id = int(api_id_raw)
-    except ValueError as exc:
-        raise AppException("API_ID 必须是整数", status_code=400) from exc
-
+    validated = {key: validate_config_value(key, value) for key, value in values.items()}
     return TelegramAuthConfig(
-        api_id=api_id,
-        api_hash=api_hash,
-        phone_number=phone_number,
-        session_name=session_name,
+        api_id=validated["API_ID"],
+        api_hash=validated["API_HASH"],
+        phone_number=validated["PHONE_NUMBER"],
+        session_name=validated["SESSION_NAME"],
     )
+
+
+def config_change_effect(keys: Iterable[str]) -> dict[str, bool]:
+    definitions = [CONFIG_REGISTRY[key] for key in keys]
+    return {
+        "restart_required": any(item.restart_required for item in definitions),
+        "worker_reload_required": any(item.worker_reload_required for item in definitions),
+    }
